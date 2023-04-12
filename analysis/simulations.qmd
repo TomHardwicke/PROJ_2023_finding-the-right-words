@@ -1,0 +1,467 @@
+---
+title: "Finding the right words to evaluate research: Pre-study simulations and analyses"
+author: "Tom Hardwicke"
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show the code"
+---
+
+```{r load_packages, include = F}
+library(tidyverse) # munging
+library(here) # loading files
+library(truncnorm) # simulating data
+library(cowplot) # plotting
+library(DescTools) # multinomial CIs
+library(ggridges) # plotting
+library(knitr) # tables
+library(confintr) # CIs
+library(exact2x2) # McNemar test
+source('weightedTopK.R') # to compute Kendall's distance
+okabe <- c("#009E73", "#E69F00", "#F0E442", "#0072B2", "#CC79A7") # colour palette
+```
+
+## Simulate data
+
+Firstly let's simulate 200 data points representing responses to the eLife vocabulary and the alternative vocabulary. For each word, we randomly draw from a truncated normal distribution with a specified mean and standard deviation. The distribution is truncated at 0 and 100, representing the 0-100 response scale used by participants.
+
+The simulation parameters (i.e., means and standard deviations) are deliberately chosen so that the eLife vocabulary has poorer performance relative to the alternative vocabulary. This is intended to represent a possible scenario of interest rather than our hypotheses about the actual data distributions.
+
+For brevity, we've only simulated data for the significance/importance evaluative dimension (the same analyses will also be used for the strength of support dimension).
+
+```{r simluate_data}
+N <- 200 # specify sample size
+set.seed(123) # set random seed for reproducibility
+
+# specify the words in each vocabulary set
+importance_vocab_elife <- c('useful','valuable','important','fundamental','landmark')
+importance_vocab_alt <- c('very low importance','low importance','moderate importance','high importance','very high importance')
+
+# simulate data for eLife vocabulary
+df_elife <- tibble(
+  participant = seq(1,N), # create vector of participant ids
+  # next five rows simulate data for each word
+  "{importance_vocab_elife[1]}" := rtruncnorm(n=N, a=0, b=100, mean = 30, sd = 30),
+  "{importance_vocab_elife[2]}" := rtruncnorm(n=N, a=0, b=100, mean = 65, sd = 10),
+  "{importance_vocab_elife[3]}" := rtruncnorm(n=N, a=0, b=100, mean = 60, sd = 15),
+  "{importance_vocab_elife[4]}" := rtruncnorm(n=N, a=0, b=100, mean = 80, sd = 10),
+  "{importance_vocab_elife[5]}" := rtruncnorm(n=N, a=0, b=100, mean = 90, sd = 10)) %>%
+  pivot_longer( # pivot the dataframe from wide to long format
+    cols = -participant,
+    names_to = 'word',
+    values_to = 'response') %>%
+  mutate(word = factor(word, levels = importance_vocab_elife)) %>% # convert to factor
+  group_by(participant) %>%
+  mutate(rank_intended = seq(1,5)) # add intended ranks
+
+# simulate data for alternative vocabulary
+df_alt <- tibble(
+  participant = seq(1,N), # create vector of participant ids
+  # next five rows simulate data for each word
+  "{importance_vocab_alt[1]}" := rtruncnorm(n=N, a=0, b=100, mean = 10, sd = 10),
+  "{importance_vocab_alt[2]}" := rtruncnorm(n=N, a=0, b=100, mean = 30, sd = 10),
+  "{importance_vocab_alt[3]}" := rtruncnorm(n=N, a=0, b=100, mean = 50, sd = 10),
+  "{importance_vocab_alt[4]}" := rtruncnorm(n=N, a=0, b=100, mean = 70, sd = 10),
+  "{importance_vocab_alt[5]}" := rtruncnorm(n=N, a=0, b=100, mean = 90, sd = 10)) %>%
+  pivot_longer( # pivot the dataframe from wide to long format
+    cols = -participant,
+    names_to = 'word',
+    values_to = 'response') %>%
+  mutate(word = factor(word, levels = importance_vocab_alt)) %>% # convert to factor
+  group_by(participant) %>%
+  mutate(rank_intended = seq(1,5)) # add intended ranks
+
+# combine the dataframes
+df_elife <- df_elife %>%
+  mutate(vocab = 'elife')
+df_alt <- df_alt %>%
+  mutate(vocab = 'alt')
+df_both <- bind_rows(df_elife,df_alt) %>%
+  mutate(vocab = factor(vocab, levels = c('elife','alt')))
+```
+
+## Visualize the data
+
+@fig-ridge shows a 'ridgeline' plot representing the simulated response distributions for each word (see [Wilke, 2019](https://clauswilke.com/dataviz/index.html)). These are kernel density distributions which represent the relative probability of observing different responses (akin to a 'smoothed histogram').
+
+```{r}
+
+#### plot the distribution of responses to all words in each vocabulary ####
+
+facet_labels <- c(elife = "eLife vocabulary", alt = "Alternative vocabulary")
+
+ridge_both <- df_both %>%
+  mutate(vocab = factor(vocab, levels = c('elife','alt'))) %>%
+  ggplot(aes(x = response, y = word, fill = factor(after_stat(quantile)))) +
+  facet_wrap(.~vocab, nrow = 2, drop = T, scales = 'free', labeller=labeller(vocab = facet_labels)) +
+  geom_density_ridges_gradient(
+    calc_ecdf = TRUE,
+    quantiles = c(0.25, 0.5, 0.75), 
+    quantile_lines = TRUE,
+    rel_min_height = 0.01,
+    bandwidth = 3) +
+    scale_fill_manual(
+    name = "Probability", values = c("gray85", "skyblue", "skyblue", "gray85"),
+    guide = "none"
+  ) +
+  theme_ridges(center_axis_labels = T) +
+  theme(
+    panel.spacing = unit(2, "lines"), # space between facets
+    strip.text.x = element_text(size=14, face = 'bold', hjust = 0, margin=margin(l=0)),
+    strip.background = element_rect(colour='white', fill='white')) +
+  scale_x_continuous(limits = c(0,100), expand = c(0, 0)) +
+  scale_y_discrete(expand = expansion(mult = c(0.01, .5)))
+```
+
+```{r fig-ridge, warning = F, echo = F, fig.height=8, fig.cap = 'Responses to each word as kernel density distributions with the 25th, 50th (i.e., median), and 75th quantiles represented by vertical lines and the 25th-75th quantile region (i.e., interquartile range) highlighted in blue.'}
+ridge_both
+```
+
+@tbl-descript below shows the 25th, 50th (i.e., median), and 75th percentiles of responses for each word (equivalently represented by the vertical lines in @fig-ridge). Because these are sample estimates of population parameters, the table also includes 95% bootstrapped confidence intervals for each of these percentile estimates.
+
+```{r}
+# function to print a quantile (e.g., median) with exact or bootstrapped confidence intervals for a given vector
+printQuantileCI <- function(x, q){
+  out <- ci_quantile(x, q, type = 'bootstrap', boot_type = 'perc', R = 1000, seed = 123)
+  # create a statement with the extracted CIs
+  print.out <- paste0(round(out$estimate,1),' [', round(out$interval[1],1),',',round(out$interval[2],1),']')
+  return(print.out)
+}
+  
+printIQRCI <- function(x){
+  out <- ci_IQR(x, type = 'bootstrap', boot_type = 'perc', R = 1000, seed = 123)
+    # create a statement with the extracted CIs
+  print.out <- paste0(round(out$estimate,1),' [', round(out$interval[1],1),',',round(out$interval[2],1),']')
+  return(print.out)
+}  
+
+# compute median, IQR, lower and upper quartiles with confidence intervals
+word_summary <- df_both %>%
+  group_by(vocab, word) %>%
+  summarise(`median [CI]` = printQuantileCI(response, q = .5),
+            `IQR [CI]` = printIQRCI(response),
+            `25th percentile [CI]` = printQuantileCI(response, q = .25),
+            `75th percentile [CI]` = printQuantileCI(response, q = .75), .groups = 'drop')
+```
+
+```{r}
+#| echo: false
+#| label: tbl-descript
+#| tbl-cap: "Descriptive statistics for responses to the eLife and alternative vocabularies. CI: 95% confidence intervals bootstrapped with the percentile method."
+kable(word_summary)
+```
+
+## Research Q1. To what extent do people share similar interpretations of the same phrases?
+
+Ideally, a given word will elicit the same interpretation across all people. Its unrealistic to expect an exact match on a continuous response scale, but all else equal, a word that elicits more consistent interpretations is preferable to one that elicits more varied interpretations.
+
+We can gauge the consistency of interpretations by (a) visually inspecting @fig-ridge to get a sense of how responses are distributed; (b) examining the interquartile range (IQR) in @tbl-descript, which indicates the range of interpretations elicited among the middle half of participants.
+
+For our simulated data, we can see that overall the eLife vocabulary elicits much more varied interpretations relative to the alternative vocabulary. The alternative vocabulary words consistently have an IQR of around 10-14, whereas the eLife vocabulary IQRs range from around 11 to 32. We can see that some specific words perform more poorly than others, for example, "useful" elicits an extremely broad range of responses.
+
+In summary, some words in the eLife vocabulary elicit highly varied interpretations which suggests they are not ideal for the purposes of scientific communication. The words in the alternative vocabulary had less varied interpretations by comparison, suggesting they are an improvement on the elife vocabulary.
+
+## Research Q2. To what extent do (a) people share the same implicit ranking of the phrases and to what extent does this (b) align with the intended ranking?
+
+Participants will respond to each word on a continuous scale (0-100); by doing so, they are also implicitly ranking the words (in order of significance/importance). Just as we examined the consistency of continuous responses above, we can examine the consistency of rankings. Later it will be useful to compare these implicit rankings (from herein 'observed rankings') to the ranking intended by eLife/ourselves (from herein 'intended rankings'). Firstly, we need to convert the continuous responses to rankings; to do this, for each participant we order the words by the magnitude of their continuous responses and assign ranks.
+
+```{r}
+# add a column with continuous responses converted to ranks for each vocabulary set for each participant
+df_both <- df_both %>%
+  group_by(vocab, participant) %>%
+  arrange(response, .by_group = T) %>%
+  mutate(rank_observed = order(response)) %>%
+  ungroup()
+```
+
+One way to examine the ranking data is to look at the proportion of participants who ranked the words in particular orders (from herein 'ranking sequences'). In @fig-rank-prop (see @tbl-rank-prop-elife and @tbl-rank-prop-alt for corresponding tabular data) the y-axis shows all of the observed rankings sequences that occurred, with the intended ranking highlighted in green, and the x-axis shows the percentage of participants whose responses adhered to those sequences.
+
+For the eLife vocabulary, there was considerable variation in ranking sequences and, although the intended ranking was the second most popular, the majority of observed rankings deviated from the intended ranking. By contrast, for the alternative vocabulary, there was much more consistency in rankings and the majority of observed rankings matching the intended ranking.
+
+```{r}
+# identify the different types of rank orderings used
+rank_summary_elife <- df_both %>%
+  filter(vocab == 'elife') %>%
+  pivot_wider(id_cols = participant, values_from = rank_observed, names_from = word, names_sort = T) %>%
+  unite(col = 'rank_observed', useful:landmark) %>%
+  mutate(rank_observed = factor(rank_observed)) %>%
+  count(rank_observed) %>%
+  arrange(desc(n)) %>%
+  cbind(MultinomCI(.$n, 
+                   conf.level=0.95,
+                   method="sisonglaz")) %>%
+  mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+  mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+  mutate(rankMatch = ifelse(rank_observed == '1_2_3_4_5', T, F)) # identify which observed ranking maps to the intended ranking
+
+rank_summary_alt <- df_both %>%
+  filter(vocab == 'alt') %>%
+  pivot_wider(id_cols = participant, values_from = rank_observed, names_from = word, names_sort = T) %>%
+  unite(col = 'rank_observed', `very low importance`:`very high importance`) %>%
+  mutate(rank_observed = factor(rank_observed)) %>%
+  count(rank_observed) %>%
+  arrange(desc(n)) %>%
+  cbind(MultinomCI(.$n, 
+                   conf.level=0.95,
+                   method="sisonglaz")) %>%
+  mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+  mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+  mutate(rankMatch = ifelse(rank_observed == '1_2_3_4_5', T, F)) # identify which observed ranking maps to the intended ranking
+
+# make rankings plot
+
+rank_plot_elife <- rank_summary_elife %>%
+  mutate(rank_observed = fct_reorder(rank_observed, n)) %>%
+  ggplot(aes(x = rank_observed, y = est, colour = rankMatch)) +
+  geom_pointrange(aes(ymin = lwr.ci, ymax = upr.ci)) +
+  coord_flip() +
+  scale_colour_manual(values = c('TRUE' = okabe[1], 'FALSE' = okabe[5]), guide = 'none') +
+  theme_cowplot() +
+  ylim(0,100) +
+  xlab('observed rankings') +
+  ylab('participants (%)') +
+  ggtitle('eLife vocabulary')
+
+rank_plot_alt <- rank_summary_alt %>%
+  mutate(rank_observed = fct_reorder(rank_observed, n)) %>%
+  ggplot(aes(x = rank_observed, y = est, colour = rankMatch)) +
+  geom_pointrange(aes(ymin = lwr.ci, ymax = upr.ci)) +
+  coord_flip() +
+  scale_colour_manual(values = c('TRUE' = okabe[1], 'FALSE' = okabe[5]), guide = 'none') +
+  theme_cowplot() +
+  ylim(0,100) +
+  xlab('observed ranking sequences') +
+  ylab('participants (%)') +
+  ggtitle('alternative vocabulary')
+```
+
+```{r}
+#| echo: false
+#| label: fig-rank-prop
+#| fig-cap: "The percentage of participants whose responses adhered to particular ranking sequences. The intended ranking is in green. Error bars represent 95% Confidence Intervals for multinomial proportions computed via the Sison-Glaz method."
+#| fig-height: 12
+plot_grid(rank_plot_elife,rank_plot_alt, ncol = 2)
+```
+
+```{r}
+#| echo: false
+#| label: tbl-rank-prop-elife
+#| tbl-cap: "For the eLife vocabulary, number and percentage of participants whose responses adhered to particular ranking sequences. CI: 95% Confidence Intervals for multinomial proportions computed via the Sison-Glaz method. NB. For brevity, ranking sequences adhered to by fewer than 10 participants are not shown in this table."
+rank_summary_elife %>% 
+  filter(n > 9) %>%
+  select(`observed rank` = rank_observed, n,`% [CI]` = percentCI) %>%
+  kable()
+```
+
+```{r}
+#| echo: false
+#| label: tbl-rank-prop-alt
+#| tbl-cap: "For the alternative vocabulary, number and percentage of participants whose responses adhered to particular ranking sequences. CI: 95% Confidence Intervals for multinomial proportions computed via the Sison-Glaz method."
+rank_summary_alt %>% 
+  select(`observed rank` = rank_observed, n,`% [CI]` = percentCI) %>%
+  kable()
+```
+
+It is possible that differences between the two vocabularies are the result of sampling error. To address this, we can do a hypothesis test to determine whether ranking accuracy (i.e., whether observed rankings are more consistent with the intended ranking) is better for the alternative vocabulary relative to the eLife vocabulary. To simplify this test, we reduce the data to whether observed rankings matched or did not match the intended ranking (i.e., we group together all of the non-intended 'other' rankings). That results in the contingency table shown below.
+
+```{r}
+continge_prep <- df_both %>%
+  pivot_wider(id_cols = c(vocab,participant), values_from = rank_observed, names_from = rank_intended, names_sort = T) %>%
+  unite(col = 'rank_observed', 3:7) %>%
+  mutate(rank_intended = '1_2_3_4_5',
+         rankMatch = ifelse(rank_observed == rank_intended,T,F)) %>%
+  pivot_wider(id_cols = participant, values_from = rankMatch, names_from = vocab) %>%
+  count(elife, alt)
+
+continge_table <- matrix(c(
+  continge_prep %>% filter(elife == F, alt == F) %>% pull(n),
+  continge_prep %>% filter(elife == T, alt == F) %>% pull(n),
+  continge_prep %>% filter(elife == F, alt == T) %>% pull(n),
+  continge_prep %>% filter(elife == T, alt == T) %>% pull(n)), ncol = 2) 
+```
+
+|                      |          | alternative vocabulary |       |
+|----------------------|----------|------------------------|-------|
+|                      |          | NO MATCH               | MATCH |
+| **elife vocabulary** | NO MATCH | 61                     | 114   |
+|                      | MATCH    | 8                      | 17    |
+
+Each cell of the table represents the contingency between whether a participant's observed ranking matched the intended ranking for the alternative and eLife vocabularies respectively. For example, the bottom-right of the table (MATCH-MATCH) represents participants whose observed rankings matched the intended ranking for both the eLife and the alternative vocabulary.
+
+A McNemar test can be used to test whether observed rankings were more likely to match the intended ranking (i.e., 'correct responses') for the alternative vocabulary relative to the eLife vocabulary. This test only uses the discordant cells (i.e., MATCH-NOMATCH and NOMATCH-MATCH). Specifically, we test the null hypothesis that the number of participants who correctly responded to the eLife vocabulary, and not the alternative vocabulary (MATCH-NOMATCH), is equal to the number of participants who correctly responded the alternative vocabulary, and not the eLife vocabulary (NOMATCH-MATCH). We report the results of the 'exact' McNemar test, the McNemar odds ratio, and Clopper-Pearson confidence intervals, adjusted with the 'midp' method, as recommended by Fagerland et al. (2013).
+
+```{r}
+# exact mcnemar test with OR and CIs
+mcnemar.out <- continge_table %>% exact2x2(paired = T, midp = T)
+```
+
+Here, the McNemar test indicates that observing a difference this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r mcnemar.out$estimate[[1]]`, 95% CI \[`r round(mcnemar.out$conf.int[[1]],0)`,`r round(mcnemar.out$conf.int[[2]],0)`\], *p* `r scales::pvalue(mcnemar.out$p.value[[1]])`). The odds ratio suggests the alternative vocabulary affords a considerable improvement over the eLife vocabulary in terms of correct responses, though there is a fair amount of uncertainty about the size of the improvement.
+
+The approach above is hopefully fairly straightforward, but it doesn't take into account the fact that some ranking sequences will be more similar to the intended ranking sequence than others. One way to quantify the consistency between observed and intended rankings, is to compute Kendall's tau distance (*K~d~*) --- a metric that describes the difference between two lists in terms of the number of adjacent pairwise swaps required to convert one list into the other (Kendall, 1938). The larger the distance, the larger the dissimilarity between the two lists. *K~d~* ranges from 0 (indicating complete agreement) to n(n-1)/2 (where n is the size of one list). Note that it is also possible to normalise *K~d~* to a range of 0 to 1, but we will stick with the raw *K~d~* for now as it can be directly interpreted.
+
+To explain *K~d~* a little more, Consider an example case where two individuals are asked to rank three fruits in their favourite order. The maximum number of adjacent pairwise deviations from the intended ranking is 3, therefore the *K~d~* is 3. The observed rankings are as follows:
+
+*Person A = Orange, Apple, Pear*
+
+*Person B = Pear, Apple, Orange*
+
+In this case, *K~d~* = 3, because three adjacent pairwise swaps are required to convert Person A's list into Person B's list (specifically, we need to swap Apple-Pear, then Pear-Orange, then Apple-Orange.).
+
+So we can use *K~d~* the calculate the distance between a given participant's ranking and the intended ranking. As the list size is 5, the max *K~d~* is 10. For the eLife vocabulary, we could compare for example:
+
+*Intended (eLife) ranking = useful, valuable, important, fundamental, landmark* 
+
+*Observed (one participant) ranking = useful, important, valuable, fundamental, landmark*
+
+In this case, *K~d~* = 1, because only a single adjacent pairwise swap (valuable \<-\> important) is necessary to convert the participant's ranking into the intended ranking.
+
+After calculating a *K~d~* for each participant, we can compute medians and IQRs to get a sense of the consistency between participants' intuitive rankings and the intended rankings for the different vocabularies. Unlike @fig-rank-prop and the McNemar test above, this approach directly takes into account the similarity of observed and intended rankings.
+
+```{r}
+# get rank sequence used by each participant
+p_rank_seq_elife <- df_both %>%
+  filter(vocab == 'elife') %>% 
+  group_by(participant) %>% 
+  summarise(rank_seq = paste(rank_intended, collapse = '_')) %>% 
+  ungroup()
+
+p_rank_seq_alt <- df_both %>% 
+  filter(vocab == 'alt') %>%
+  group_by(participant) %>% 
+  summarise(rank_seq = paste(rank_intended, collapse = '_')) %>% 
+  ungroup()
+
+# count number of participants using each ranking sequence
+p_rank_seq_elife_count <- p_rank_seq_elife %>%
+  count(rank_seq) %>%
+  ungroup() %>%
+  mutate(popularity_rank = row_number(desc(n))) %>%
+  mutate(rank_seq_colour = ifelse(popularity_rank > 5, 'other', rank_seq)) %>%
+  arrange(desc(n))
+
+p_rank_seq_alt_count <- p_rank_seq_alt %>%
+  count(rank_seq) %>%
+  ungroup() %>%
+  mutate(popularity_rank = row_number(desc(n))) %>%
+  mutate(rank_seq_colour = ifelse(popularity_rank > 5, 'other', rank_seq)) %>%
+  arrange(desc(n))
+
+# gather the data together
+p_rank_seq_elife <- p_rank_seq_elife %>%
+  left_join(p_rank_seq_elife_count, by = 'rank_seq')
+
+p_rank_seq_alt <- p_rank_seq_alt %>%
+  left_join(p_rank_seq_alt_count, by = 'rank_seq')
+
+
+# this is to normalise Kd
+rank_length <- 5 # this is the length of one of the ranked lists - may need to be changed if e.g., we use more words in the alternative vocab
+normalisationFactor <- (rank_length*(rank_length-1))/2
+
+# compute Kd for each vocabularly for each participant
+p_rank_seq_elife <- p_rank_seq_elife %>%
+  rowwise() %>%
+  mutate(kendall_distance = calcTopTau(as.numeric(str_split(rank_seq,'_')[[1]]),c(1,2,3,4,5)),
+         kendall_distance_normalized = kendall_distance/normalisationFactor)
+
+p_rank_seq_alt <- p_rank_seq_alt %>%
+  rowwise() %>%
+  mutate(kendall_distance = calcTopTau(as.numeric(str_split(rank_seq,'_')[[1]]),c(1,2,3,4,5)),
+         kendall_distance_normalized = kendall_distance/normalisationFactor)
+
+# combine the dataframes
+p_rank_seq_both <- bind_rows(
+  p_rank_seq_elife %>% mutate(vocab = 'elife'),
+  p_rank_seq_alt %>% mutate(vocab = 'alt')
+)
+
+# compute medians and IQRs with CIs
+p_rank_seq_both_summary <- p_rank_seq_both %>%
+  group_by(vocab) %>%
+  summarise(`Median [CI]` = printQuantileCI(kendall_distance, .5),
+            `IQR [CI]` = printIQRCI(kendall_distance))
+
+kd_plots <- p_rank_seq_both %>%
+  count(vocab, kendall_distance) %>%
+  ggplot(aes(y = n, x = kendall_distance)) +
+    facet_wrap(.~vocab, nrow = 2) +
+    geom_col() +
+    theme_cowplot() +
+    ylim(0,200)
+```
+
+@fig-kd-plots illustrates the extent to which participants' observed rankings deviated from the intended ranking in terms of *K~d~*. This suggests that although deviations from the intended eLife ranking are common, they only tend to be on the order of one or two disconcordant rank pairs. By contrast, the alternative vocabulary rarely results in any deviations, and when it does these are typically only in terms of one disconcordant rank pair.
+
+```{r}
+#| echo: false
+#| label: fig-kd-plots
+#| fig-cap: "Extent to which observed rankings deviated from intended rankings in terms of Kendall's distance."
+kd_plots
+```
+
+@fig-rank-prop tell us how many participants adhered to the intended ranking and @fig-kd-plots tells us by how much; however, these approaches don't give us much insight into *where* the ranking deviations are concentrated (i.e., which phrases are being misranked). This is to some extent apparent in @fig-ridge --- for example, you can see that if we look at the medians, "important" and "valuable" are often being misranked. But to address this question we ideally we need a more granular analysis of the observed ranking sequences and where they tend to deviate from the intended ranking.
+
+One approach is to plot heatmaps that show the proportion of concordant and discordant rankings at the level of individual phrases (@fig-heat). From these plots, we can clearly identify, for exmaple, that 'important' and 'useful' are especially problematic words in the eLife vocabulary (i.e., frequently misranked as each other).
+
+```{r}
+heat_elife <- df_both %>%
+  filter(vocab == 'elife') %>%
+  count(rank_intended, rank_observed) %>% 
+  mutate(percent = (n/N)*100) %>%
+  ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='percent') +
+  theme_cowplot() +
+  scale_x_continuous(breaks = seq(1,5,1), labels = str_wrap(importance_vocab_elife,10)) +
+  scale_y_continuous(breaks = seq(1,5,1), labels = str_wrap(importance_vocab_elife,10)) +
+  geom_text(aes(label = round(percent, 0)), size=2.5) +
+  ggtitle('elife vocabulary')
+
+heat_alt <- df_both %>%
+  filter(vocab == 'alt') %>%
+  count(rank_intended, rank_observed) %>% 
+  mutate(percent = (n/N)*100) %>%
+  ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='percent') +
+  theme_cowplot() +
+  scale_x_continuous(breaks = seq(1,5,1), labels = str_wrap(importance_vocab_alt,10)) +
+  scale_y_continuous(breaks = seq(1,5,1), labels = str_wrap(importance_vocab_alt,10)) +
+  geom_text(aes(label = round(percent, 0)), size=2.5) +
+  ggtitle('alternative vocabulary')
+```
+
+```{r}
+#| echo: false
+#| label: fig-heat
+#| fig-cap: "Heat plots showing the percentage of concordant and disconcordant rankings at the level of individual words separately for the elife and alternative vocabularies"
+#| fig-height: 8
+plot_grid(heat_elife, heat_alt, nrow = 2)
+```
+
+## Sample size planning
+
+```{r}
+N <- 200 # number of pairs
+pb <- .05 # the probability of a positive response only in the test individual in the pair (pb)
+pc <- .15 # the probability of a positive response only in the control individual in the pair (pc)
+
+power.out <- powerPaired2x2(pb, pc, npairs=N)
+
+test.out <- matrix(c(((1-(pb+pc))/2)*N,
+                     pb*N,
+                     pc*N,
+                     ((1-(pb+pc))/2)*N), nrow = 2) %>%
+  exact2x2(paired = T, midp = T)
+```
+
+In a scenario where 5% of participants give the correct response for the eLife vocabulary and incorrect response for the alternative vocabulary, and 15% of participants give the correct response for the alternative vocabulary and incorrect response for the eLife vocabulary, this would yield an odds ratio of `r test.out$estimate[[1]]`, 95% CI [`r round(test.out$conf.int[[1]],2)`-`r round(test.out$conf.int[[2]],2)`] and a McNemar test with statistical power `r round(power.out$power,2)` (assuming a two-sided test with alpha = .05). 
+
+## References
+
+Kendall, M. G. (1938). A new measure of rank correlation. Biometrika, 30(1--2), 81--93. https://doi.org/10.1093/biomet/30.1-2.81
+
+Fay, M. P., & Lumbard, K. (2021). Confidence intervals for difference in proportions for matched pairs compatible with exact McNemar's or sign tests. Statistics in Medicine, 40(5), 1147--1159. https://doi.org/10.1002/sim.8829
+
+Wilke, C. (2019). Fundamentals of data visualization: A primer on making informative and compelling figures (First edition). O’Reilly Media.
