@@ -24,14 +24,14 @@ okabe <- c("#009E73", "#E69F00", "#F0E442", "#0072B2", "#CC79A7") # colour palet
 
 ## Simulate data
 
-Firstly let's simulate 200 data points representing responses to the eLife vocabulary and the alternative vocabulary. For each word, we randomly draw from a truncated normal distribution with a specified mean and standard deviation. The distribution is truncated at 0 and 100, representing the 0-100 response scale used by participants.
+Firstly let's simulate 300 data points representing responses to the eLife vocabulary and the alternative vocabulary. For each word, we randomly draw from a truncated normal distribution with a specified mean and standard deviation. The distribution is truncated at 0 and 100, representing the 0-100 response scale used by participants.
 
 The simulation parameters (i.e., means and standard deviations) are deliberately chosen so that the eLife vocabulary has poorer performance relative to the alternative vocabulary. This is intended to represent a possible scenario of interest rather than our hypotheses about the actual data distributions.
 
 For brevity, we've only simulated data for the significance/importance evaluative dimension (the same analyses will also be used for the strength of support dimension).
 
 ```{r simluate_data}
-N <- 200 # specify sample size
+N <- 300 # specify sample size
 set.seed(123) # set random seed for reproducibility
 
 # specify the words in each vocabulary set
@@ -443,9 +443,9 @@ plot_grid(heat_elife, heat_alt, nrow = 2)
 ## Sample size planning
 
 ```{r}
-N <- 200 # number of pairs
-pb <- .05 # the probability of a positive response only in the test individual in the pair (pb)
-pc <- .15 # the probability of a positive response only in the control individual in the pair (pc)
+N <- 300 # number of pairs
+pb <- .10 # the probability of a positive response only in the test individual in the pair (pb)
+pc <- .20 # the probability of a positive response only in the control individual in the pair (pc)
 
 power.out <- powerPaired2x2(pb, pc, npairs=N)
 
@@ -456,7 +456,7 @@ test.out <- matrix(c(((1-(pb+pc))/2)*N,
   exact2x2(paired = T, midp = T)
 ```
 
-In a scenario where 5% of participants give the correct response for the eLife vocabulary and incorrect response for the alternative vocabulary, and 15% of participants give the correct response for the alternative vocabulary and incorrect response for the eLife vocabulary, this would yield an odds ratio of `r test.out$estimate[[1]]`, 95% CI [`r round(test.out$conf.int[[1]],2)`-`r round(test.out$conf.int[[2]],2)`] and a McNemar test with statistical power `r round(power.out$power,2)` (assuming a two-sided test with alpha = .05). 
+In a scenario where 10% of 300 participants give the correct response for the eLife vocabulary and incorrect response for the alternative vocabulary, and 20% of participants give the correct response for the alternative vocabulary and incorrect response for the eLife vocabulary, this would yield an odds ratio of `r test.out$estimate[[1]]`, 95% CI [`r round(test.out$conf.int[[1]],2)`-`r round(test.out$conf.int[[2]],2)`] and a McNemar test with statistical power `r round(power.out$power,2)` (assuming a two-sided test with alpha = .05). 
 
 ## References
 
