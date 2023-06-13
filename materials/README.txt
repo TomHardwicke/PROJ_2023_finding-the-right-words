@@ -1,0 +1,1 @@
+The experiment was set up in Qualtrics. We have exported two versions of the experiment: the Qualtrics formatted version (.qsf) and a version formatted in Microsoft Word (.docx). Note that the Word version is provided for ease of access and convenience, but the formatting is slightly different to how the experiment actually appears on the Qualtrics platform.
