@@ -388,7 +388,7 @@ kd_plots <- p_rank_seq_both %>%
     facet_wrap(.~vocab, nrow = 2) +
     geom_col() +
     theme_cowplot() +
-    ylim(0,200)
+    ylim(0,250)
 ```
 
 @fig-kd-plots illustrates the extent to which participants' observed rankings deviated from the intended ranking in terms of *K~d~*. This suggests that although deviations from the intended eLife ranking are common, they only tend to be on the order of one or two disconcordant rank pairs. By contrast, the alternative vocabulary rarely results in any deviations, and when it does these are typically only in terms of one disconcordant rank pair.
