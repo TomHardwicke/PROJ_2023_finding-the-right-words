@@ -284,8 +284,8 @@ continge_table <- matrix(c(
 |                      |          | alternative vocabulary |       |
 |----------------------|----------|------------------------|-------|
 |                      |          | NO MATCH               | MATCH |
-| **elife vocabulary** | NO MATCH | 61                     | 114   |
-|                      | MATCH    | 8                      | 17    |
+| **elife vocabulary** | NO MATCH | `r continge_table[1,1]`                     | `r continge_table[1,2]`   |
+|                      | MATCH    | `r continge_table[2,1]`                      | `r continge_table[2,2]`    |
 
 Each cell of the table represents the contingency between whether a participant's observed ranking matched the intended ranking for the alternative and eLife vocabularies respectively. For example, the bottom-right of the table (MATCH-MATCH) represents participants whose observed rankings matched the intended ranking for both the eLife and the alternative vocabulary.
 
