@@ -1,3 +1,40 @@
+# load custom functions and plot themes
+
+theme_custom <- function () { 
+  theme_grey(base_size = 14, base_family = "sans") %+replace% 
+    theme(
+      # plot margin
+      plot.margin = unit(rep(0.5, 4), "cm"),
+      # plot background and border
+      plot.background = element_blank(),
+      panel.background = element_blank(),
+      panel.border = element_blank(),
+      # grid lines
+      panel.grid.major.x = element_blank(),
+      panel.grid.major.y = element_line(linewidth = 0.5, linetype = 'dotted', color = "#cbcbcb"), 
+      panel.grid.minor = element_blank(),
+      # axis ticks and lines
+      axis.ticks = element_blank(),
+      axis.line = element_blank(),
+      # title, subtitle and caption
+      #plot.title = element_text(size = 20, face = "bold", colour = "#757575", hjust = 0),
+      # legend
+      legend.position = "top",
+      legend.background = element_blank(),
+      legend.key = element_blank(),
+      legend.title = element_text(size = 12, colour = "#757575"),
+      legend.text.align = 0,
+      legend.text = element_text(size = 14, colour = "#757575"),
+      # facetting
+      strip.background = element_rect(fill = "transparent", colour = NA),
+      strip.text = element_text(size = 12, face = "bold", colour = "#757575", hjust = 0)
+    )
+}
+
+# define a "not in" operator
+`%notin%` <- Negate(`%in%`)
+
+
 # Tom Hardwicke note (2023/04/12): This script was written by van Doorn et al. (2021) and obtained from https://github.com/JohnnyDoorn/KendallWeightedDistance
 # Reference: van Doorn, J., Westfall, H. A., & Lee, M. D. (2021). Using the weighted Kendall Distance to analyze rank data in psychology. The Quantitative Methods for Psychology, 17(2), 154–165. https://doi.org/10.20982/tqmp.17.2.p154
 # End note
@@ -94,7 +131,7 @@ calcTopTau <- function(x, y,
   # Now loop over all pairs of unique items 
   for(i in 1:(n-1)) {
     for(j in (i+1):n) {
-
+      
       a <- u[i]
       b <- u[j]
       
@@ -131,7 +168,7 @@ calcTopTau <- function(x, y,
       } else if (nMatches == 4) {
         # 4) a preferred to b in y, but other way around in x; + 1
         addThis <- (which(a == x) > which(b == x) && which(a == y) < which(b == y)) ||
-                   (which(a == x) < which(b == x) && which(a == y) > which(b == y))
+          (which(a == x) < which(b == x) && which(a == y) > which(b == y))
         
       }
       
@@ -144,12 +181,12 @@ calcTopTau <- function(x, y,
       } else {
         positionCostA <- positionCostB <- 1
       }
-
+      
       timesThis <- 1
       # Now incorporate the dissimilarity matrix:
       if (all(!is.na(c(a, b))) & (a != b)) 
         timesThis <- ifelse(is.na(distMat[a, b]), mean(distMat, na.rm = TRUE), distMat[a, b])
-   
+      
       # calculate the cost of the swap and add it to the total distance 
       dist <- dist + addThis * timesThis * itemWeights[a] * itemWeights[b] * positionCostA * positionCostB
     }
@@ -160,8 +197,3 @@ calcTopTau <- function(x, y,
   
   return(dist)
 }
-
-
-
-
-

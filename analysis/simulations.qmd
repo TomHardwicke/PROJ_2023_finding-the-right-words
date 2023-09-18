@@ -18,7 +18,7 @@ library(ggridges) # plotting
 library(knitr) # tables
 library(confintr) # CIs
 library(exact2x2) # McNemar test
-source('weightedTopK.R') # to compute Kendall's distance
+source(here('analysis','functions.R')) # load custom functions e.g., to compute Kendall's distance
 okabe <- c("#009E73", "#E69F00", "#F0E442", "#0072B2", "#CC79A7") # colour palette
 ```
 
