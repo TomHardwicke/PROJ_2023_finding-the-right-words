@@ -1,7 +1,6 @@
 # folders to ignore
 misc/
 protocol/
-data/raw/
 analysis/archive/
 analysis/figs/
 analysis/preliminary_analysis/
