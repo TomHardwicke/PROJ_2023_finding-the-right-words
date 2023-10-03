@@ -4,6 +4,7 @@ protocol/
 data/raw/
 analysis/archive/
 analysis/figs/
+analysis/preliminary_analysis/
 dissemination/
 
 # History files
@@ -54,5 +55,3 @@ ethics/Ethics Approval Letter.pdf
 ethics/data-management-plan.pdf
 PROJ_2023_eLife_vocab.Rproj
 ethics/Ethics Approval Letter post-mendment.pdf
-analysis/preliminary_analyses.qmd
-analysis/preliminary_analyses.html
