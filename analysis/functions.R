@@ -34,6 +34,30 @@ theme_custom <- function () {
 # define a "not in" operator
 `%notin%` <- Negate(`%in%`)
 
+# function to print a quantile (e.g., median) with exact or bootstrapped confidence intervals for a given vector
+printQuantileCI <- function(x, q, ci = T){
+  out <- ci_quantile(x, q, type = 'bootstrap', boot_type = 'perc', R = 1000, seed = 123)
+  if(ci){ # if user wants CIs
+    # create a statement with the extracted CIs
+    print.out <- paste0(round(out$estimate,1),' [', round(out$interval[1],1),',',round(out$interval[2],1),']')
+  }else{ # if user does not want CIs
+    print.out <- paste0(round(out$estimate,1))
+  }
+  return(print.out)
+}
+
+# function to print an interquartile range with exact or bootstrapped confidence intervals for a given vector
+printIQRCI <- function(x, ci = T){
+  out <- ci_IQR(x, type = 'bootstrap', boot_type = 'perc', R = 1000, seed = 123)
+  if(ci){ # if user wants CIs
+    # create a statement with the extracted CIs
+    print.out <- paste0(round(out$estimate,1),' [', round(out$interval[1],1),',',round(out$interval[2],1),']')
+  }else{
+    print.out <- paste0(round(out$estimate,1))
+  }
+  return(print.out)
+}  
+
 
 # Tom Hardwicke note (2023/04/12): This script was written by van Doorn et al. (2021) and obtained from https://github.com/JohnnyDoorn/KendallWeightedDistance
 # Reference: van Doorn, J., Westfall, H. A., & Lee, M. D. (2021). Using the weighted Kendall Distance to analyze rank data in psychology. The Quantitative Methods for Psychology, 17(2), 154–165. https://doi.org/10.20982/tqmp.17.2.p154
