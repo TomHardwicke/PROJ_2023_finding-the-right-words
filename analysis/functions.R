@@ -1,7 +1,7 @@
 # load custom functions and plot themes
 
 theme_custom <- function () { 
-  theme_grey(base_size = 14, base_family = "sans") %+replace% 
+  theme_grey(base_size = 16, base_family = "sans") %+replace% 
     theme(
       # plot margin
       plot.margin = unit(rep(0.5, 4), "cm"),
@@ -22,12 +22,12 @@ theme_custom <- function () {
       legend.position = "top",
       legend.background = element_blank(),
       legend.key = element_blank(),
-      legend.title = element_text(size = 12, colour = "#757575"),
+      legend.title = element_text(size = 12, colour = "#333333"),
       legend.text.align = 0,
-      legend.text = element_text(size = 14, colour = "#757575"),
-      # facetting
+      legend.text = element_text(size = 14, colour = "#333333"),
+      # faceting
       strip.background = element_rect(fill = "transparent", colour = NA),
-      strip.text = element_text(size = 12, face = "bold", colour = "#757575", hjust = 0)
+      strip.text = element_text(size = 16, face = "bold", colour = "#333333", hjust = 0)
     )
 }
 
