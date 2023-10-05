@@ -1,0 +1,966 @@
+---
+title: "Reproducible analysis script"
+subtitle: "Finding the right words to evaluate research: An empirical appraisal of eLife’s assessment vocabulary"
+author:
+  - name: "Tom Hardwicke"
+orcid: 0000-0001-9485-4952
+email: tom.hardwicke@unimelb.edu.au
+affiliations:
+  - name: "University of Melbourne"
+date: "2023-10-04"
+date-modified: last-modified
+title-block-banner: "#2c2e2d"
+format:
+  html:
+    embed-resources: true
+code-fold: true
+code-summary: "Show the code"
+---
+  
+## Introduction
+  
+This is a Quarto document containing a reproducible analysis for the project "Finding the right words to evaluate research: An empirical appraisal of eLife’s assessment vocabulary". The analysis is implemented in R code and interwoven with plain text. If everything's working properly, the chunks of R code should be folded up — if you want to see the code just click the grey arrows. You can also download the .qmd document and work with it on your own computer if you want to make modifications.
+
+## Set up
+
+We begin with various set up actions, including loading packages and setting figure defaults.
+
+```{r load_packages, message=F}
+library(tidyverse) # munging
+library(here) # loading files
+library(patchwork) # plotting
+library(ggridges) # plotting
+library(knitr) # tables
+library(gt) # tables
+library(kableExtra) # tables
+library(DescTools) # multinomial CIs
+library(confintr) # CIs
+library(exact2x2) # McNemar test
+source(here('analysis','functions.R')) # load custom functions e.g., to compute Kendall's distance
+```
+
+```{r figure-defaults}
+# default settings for figures
+
+# export options
+knitr::opts_chunk$set(dev = "png",
+                      dpi = 300,
+                      fig.path = 'figs/')
+
+theme_set(theme_custom()) # use this theme (see functions.R) as the default for all figures
+okabe <- c("#009E73", "#E69F00", "#F0E442", "#0072B2", "#CC79A7") # specify a colour palette
+```
+
+```{r}
+# specify the words in each vocabulary set
+importance_elife <- c('useful','valuable','important','fundamental','landmark')
+importance_alt <- c('very low importance','low importance','moderate importance','high importance','very high importance')
+support_elife <- c('inadequate','incomplete','solid','convincing','compelling','exceptional')
+support_alt <- c('very weak support','weak support','moderate support','strong support','very strong support')
+```
+
+## Preprocessing
+
+Firstly we run some preprocessing scripts. 
+
+The raw data downloaded from Qualtrics has a bunch of information we don't need. So we first run script that extracts only the columns we need (for example, we drop the responses to the maths questions) and saves a data file in the 'primary' data folder.
+
+```{r, message=F}
+source(here('analysis','raw_to_primary.R'))
+```
+
+The next script runs a few tests to check the data looks like we expect it to. It also does some formatting to prepare the data for analysis. A new data file is saved in the 'processed' data folder — this is the file we will perform the analyses on.
+
+```{r, message=F}
+source(here('analysis','primary_to_processed.R'))
+```
+
+## Load data
+
+Now we're ready for the main analysis. Let's load the processed data.
+
+```{r}
+d <- read_csv(here('data','processed','data.csv'), show_col_types = FALSE) 
+```
+
+## Format data
+
+Now we need R to understand that the phrases for each vocabularly should appear in a particular order in figures/tables.
+
+```{r}
+# set the order for factor levels
+d <- d %>%
+  mutate(phrase = factor(phrase, levels = c(support_alt,support_elife, importance_alt, importance_elife)))
+```
+
+## Check exclusion criteria
+
+```{r}
+N <- d %>% distinct(id) %>% nrow()
+```
+
+The total sample size is `r N`.
+
+How many participants failed the attention check? (They were asked to respond '80' to indicate they were paying attention).
+
+```{r}
+att_fail <- d %>% distinct(id, attention_check) %>% filter(attention_check != 80) %>% nrow()
+```
+
+`r att_fail` (`r round(att_fail/N*100,0)`%) failed the attention check.
+
+Could it be that participants found it difficult to use the slider and we're trying to respond with 80 but couldn't quite get it right?
+
+```{r attention_check_histogram}
+d %>% distinct(id, attention_check) %>% filter(attention_check != 80) %>% pull(attention_check) %>% hist(main = 'Histogram of attention check responses (failures only)', xlab = 'attention check response')
+```
+
+No — the vast majority of participants who failed the attention check were not responding with anything near 80.
+
+How many folks took less than 5 minutes (300 seconds)?
+
+```{r}
+too_fast <- d %>% distinct(id, duration) %>% filter(duration < 300) %>% nrow()
+```
+
+`r too_fast` participants were too fast.
+
+How many folks took more than 30 minutes (1800 seconds)?
+
+```{r}
+too_slow <- d %>% distinct(id, duration) %>% filter(duration >1800) %>% nrow()
+```
+
+`r too_slow` participants were too slow.
+
+How many folks did not respond to all 21 phrases?
+
+```{r}
+non_complete <- d %>% filter(is.na(d$response)) %>% distinct(id) %>% nrow()
+```
+
+`r non_complete` participants didn't respond to all phrases (as expected as responses were forced).
+
+Per protocol, we exclude all data from participants that failed any of these criteria (note some participants failed multiple criteria).
+
+```{r}
+# identify participants to exclude
+excluded_ids <- d %>% mutate(
+  attention_check_logical = ifelse(attention_check == 80, T, F),
+  duration_check_logical = ifelse(duration < 300 | duration > 1800, F, T)) %>%
+  filter(attention_check_logical == F | duration_check_logical == F) %>%
+  distinct(id) %>%
+  pull(id)
+```
+
+So we are excluding `r length(excluded_ids)` participants in total.
+
+```{r}
+# exclude participants
+d <- d %>% filter(id %notin% excluded_ids)
+```
+```{r}
+N_eligible <- d %>% distinct(id) %>% nrow()
+```
+
+And we have `r N_eligible` eligible participants remaining (we accidentally recruited one more participant than we needed).
+
+## Participant characteristics
+
+Recall that we used the prescreening tool to select only participants who said they had a doctorate degree. But we also asked them directly, "Which of these is the highest level of education you have completed?". Participants responded:
+  
+```{r}
+d %>% distinct(id,education_level) %>% count(education_level) %>% kable()
+```
+
+We have a few who chose graduate degree rather than doctorate; perhaps they are currently doing a doctorate and misunderstood 'completed'. Regardless, I don't think this is problematic.
+
+We also asked participants "Which of these subject areas most closest represents your degree?" with the options Arts & Humanities, Life Sciences and Biomedicine, Physical Sciences, Social Sciences, Other. Participants responded:
+
+```{r}
+d %>% distinct(id,subject_area) %>% count(subject_area) %>% kable()
+```
+
+The "other" responses were:
+
+```{r}
+d %>% distinct(id,subject_area,subject_area_other) %>% filter(subject_area == "Other") %>% count(subject_area_other) %>% arrange(desc(n)) %>% kable()
+```
+
+## Text for the manuscript
+
+Participants reported that their highest completed education level was either a doctorate degree (n = `r d %>% distinct(id,education_level) %>% count(education_level) %>% filter(education_level == "Doctorate degree (PhD/other)") %>% pull(n)`) or graduate degree (n = `r d %>% distinct(id,education_level) %>% count(education_level) %>% filter(education_level == "Graduate degree (MA/MSc/MPhil/other)") %>% pull(n)`) . The subject areas that most closely represented participants’ degrees were Life Sciences and Biomedicine (n = `r d %>% distinct(id,subject_area) %>% count(subject_area) %>% filter(subject_area == "Life Sciences and Biomedicine") %>% pull(n)`), Social Sciences (n = `r d %>% distinct(id,subject_area) %>% count(subject_area) %>% filter(subject_area == "Social Sciences") %>% pull(n)`), Physical Sciences (n = `r d %>% distinct(id,subject_area) %>% count(subject_area) %>% filter(subject_area == "Physical Sciences") %>% pull(n)`), Arts & Humanities (n = `r d %>% distinct(id,subject_area) %>% count(subject_area) %>% filter(subject_area == "Arts & Humanities") %>% pull(n)`) and various “other” disciplines (n = `r d %>% distinct(id,subject_area) %>% count(subject_area) %>% filter(subject_area == "Other") %>% pull(n)`).
+
+Tidy up a bit:
+
+```{r}
+# drop the demographic and eligibility columns
+d <- d %>%
+  select(-duration,-attention_check, -education_level, -education_level_other, -subject_area, -subject_area_other)
+```
+
+# Response distributions
+
+The distribution of participants’ responses to each phrase is shown in @fig-ridge-import (importance/significance dimension) and @fig-ridge-support (support dimension). These ‘ridgeline’ plots (Wilke, 2019) are kernel density distributions which represent the relative probability of observing different responses (akin to a smoothed histogram).
+
+
+```{r}
+# plot the distribution of responses to all words in each vocabulary
+
+facet_labels <- c(elife = "eLife vocabulary", alt = "Alternative vocabulary")
+
+ridge_import <- d %>%
+  filter(dimension == "importance") %>%
+  mutate(vocab = factor(vocab, levels = c('elife','alt'))) %>%
+  ggplot(aes(x = response, y = phrase, fill = factor(after_stat(quantile)))) +
+  facet_wrap(.~vocab, nrow = 2, drop = T, scales = 'free_y', labeller=labeller(vocab = facet_labels)) +
+  geom_density_ridges_gradient(
+    calc_ecdf = TRUE,
+    quantiles = c(0.25, 0.5, 0.75), 
+    quantile_lines = TRUE,
+    rel_min_height = 0.01,
+    bandwidth = 3) +
+  scale_fill_manual(
+    name = "Probability", values = c("gray85", "skyblue", "skyblue", "gray85"),
+    guide = "none"
+  ) +
+  theme_ridges(center_axis_labels = T) +
+  theme(
+    panel.grid.major.x = element_line(linetype = "dashed"),
+    plot.title = element_text(size=18),
+    panel.spacing = unit(2, "lines"), # space between facets
+    strip.text.x = element_text(size=14, face = 'bold', hjust = 0, margin=margin(b = 10)),
+    strip.background = element_rect(colour='white', fill='white')) +
+  scale_x_continuous(limits = c(0,100), expand = c(0, 0)) +
+  scale_y_discrete(expand = expansion(mult = c(0.01, .5))) +
+  ggtitle("Importance dimension")
+
+
+ridge_support <- d %>%
+  filter(dimension == "support") %>%
+  mutate(vocab = factor(vocab, levels = c('elife','alt'))) %>%
+  ggplot(aes(x = response, y = phrase, fill = factor(after_stat(quantile)))) +
+  facet_wrap(.~vocab, nrow = 2, drop = T, scales = 'free_y', labeller=labeller(vocab = facet_labels)) +
+  geom_density_ridges_gradient(
+    calc_ecdf = TRUE,
+    quantiles = c(0.25, 0.5, 0.75), 
+    quantile_lines = TRUE,
+    rel_min_height = 0.01,
+    bandwidth = 3) +
+  scale_fill_manual(
+    name = "Probability", values = c("gray85", "skyblue", "skyblue", "gray85"),
+    guide = "none"
+  ) +
+  theme_ridges(center_axis_labels = T) +
+  theme(
+    panel.grid.major.x = element_line(linetype = "dashed"),
+    plot.title = element_text(size=18),
+    panel.spacing = unit(2, "lines"), # space between facets
+    strip.text.x = element_text(size=14, face = 'bold', hjust = 0, margin=margin(b = 10)),
+    strip.background = element_rect(colour='white', fill='white')) +
+  scale_x_continuous(limits = c(0,100), expand = c(0, 0)) +
+  scale_y_discrete(expand = expansion(mult = c(0.01, .5))) +
+  ggtitle("Support dimension")
+```
+
+```{r fig-ridge-import, warning = F, echo = F, fig.height=8, fig.cap = 'Responses to each phrase on the importance/significance dimension as kernel density distributions with the 25th, 50th (i.e., median), and 75th quantiles represented by black vertical lines and the 25th-75th quantile region (i.e., interquartile range) highlighted in blue.'}
+ridge_import
+```
+
+```{r fig-ridge-support, warning = F, echo = F, fig.height=8, fig.cap = 'Responses to each phrase on the support dimension as kernel density distributions with the 25th, 50th (i.e., median), and 75th quantiles represented by black vertical lines and the 25th-75th quantile region (i.e., interquartile range) highlighted in blue.'}
+ridge_support
+```
+
+@tbl-descript-import-slim and @tbl-descript-support-slim show the 25th, 50th (i.e., median), and 75th percentiles of responses for each phrase (as represented by the black vertical lines in @fig-ridge-import and @fig-ridge-support). The tables includes 95% confidence intervals (bootstrapped with the percentile method, Rousselet et al., 2021) only for medians, to make the table easier to read; however, confidence intervals for all percentile estimates are available in Supplementary Tables: @tbl-descript-import-full and @tbl-descript-support-full.
+
+```{r}
+# compute median, IQR, lower and upper quartiles with confidence intervals
+phrase_summary_full <- d %>%
+  mutate(phrase = fct_rev(phrase),
+         vocab = factor(vocab, levels = c("elife", "alt"))) %>%
+  group_by(dimension, vocab, phrase) %>%
+  summarise(`median [CI]` = printQuantileCI(response, q = .5, ci = T),
+            `IQR [CI]` = printIQRCI(response),
+            `25th percentile [CI]` = printQuantileCI(response, q = .25, ci = T),
+            `75th percentile [CI]` = printQuantileCI(response, q = .75, ci = T), 
+            .groups = 'drop')
+
+# also make a slimmed-down version that only has CIs for medians and doesn't report the IQR (as this is already implicitly in the table)
+phrase_summary_slim <- d %>%
+  mutate(phrase = fct_rev(phrase),
+         vocab = factor(vocab, levels = c("elife", "alt"))) %>%
+  group_by(dimension, vocab, phrase) %>%
+  summarise(`25th percentile` = printQuantileCI(response, q = .25, ci = F),
+            `median [CI]` = printQuantileCI(response, q = .5, ci = T),
+            `75th percentile` = printQuantileCI(response, q = .75, ci = F), 
+            .groups = 'drop')
+```
+
+```{r}
+#| echo: false
+#| label: tbl-descript-import-slim
+#| tbl-cap: "Percentile estimates for participant responses to phrases on the significance/importance dimension for eLife and alternative vocabularies. CI: 95% confidence intervals bootstrapped with the percentile method."
+phrase_summary_slim %>%
+  filter(dimension == "importance") %>%
+  select(-dimension) %>%
+  mutate(vocab = fct_recode(vocab, "eLife vocabulary" = "elife", "Alternative vocabulary" = "alt")) %>%
+  gt(groupname_col = "vocab") %>%
+  row_group_order(groups = c("eLife vocabulary", "Alternative vocabulary")) %>%
+  tab_header(
+    title = md("**Importance dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = phrase
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -phrase
+  ) %>%
+  opt_align_table_header(align = "left")
+```
+
+```{r}
+#| echo: false
+#| label: tbl-descript-support-slim
+#| tbl-cap: "Percentile estimates for participant responses to phrases on the significance/importance dimension for eLife and alternative vocabularies. CI: 95% confidence intervals bootstrapped with the percentile method."
+phrase_summary_slim %>%
+  filter(dimension == "support") %>%
+  select(-dimension) %>%
+  mutate(vocab = fct_recode(vocab, "eLife vocabulary" = "elife", "Alternative vocabulary" = "alt")) %>%
+  gt(groupname_col = "vocab") %>%
+  row_group_order(groups = c("eLife vocabulary", "Alternative vocabulary")) %>%
+  tab_header(
+    title = md("**Support dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = phrase
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -phrase
+  ) %>%
+  opt_align_table_header(align = "left")
+```
+
+```{r}
+#| echo: false
+#| label: tbl-descript-import-full
+#| tbl-cap: "Percentile estimates for participant responses to phrases on the significance/importance dimension for eLife and alternative vocabularies. CI: 95% confidence intervals bootstrapped with the percentile method."
+phrase_summary_full %>%
+  filter(dimension == "importance") %>%
+  select(-dimension) %>%
+  mutate(vocab = fct_recode(vocab, "eLife vocabulary" = "elife", "Alternative vocabulary" = "alt")) %>%
+  gt(groupname_col = "vocab") %>%
+  row_group_order(groups = c("eLife vocabulary", "Alternative vocabulary")) %>%
+  tab_header(
+    title = md("**Importance dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = phrase
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -phrase
+  ) %>%
+  opt_align_table_header(align = "left")
+```
+
+```{r}
+#| echo: false
+#| label: tbl-descript-support-full
+#| tbl-cap: "Percentile estimates for participant responses to phrases on the support dimension for eLife and alternative vocabularies. CI: 95% confidence intervals bootstrapped with the percentile method."
+phrase_summary_full %>%
+  filter(dimension == "support") %>%
+  select(-dimension) %>%
+  mutate(vocab = fct_recode(vocab, "eLife vocabulary" = "elife", "Alternative vocabulary" = "alt")) %>%
+  gt(groupname_col = "vocab") %>%
+  row_group_order(groups = c("eLife vocabulary", "Alternative vocabulary")) %>%
+  tab_header(
+    title = md("**Support dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = phrase
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -phrase
+  ) %>%
+  opt_align_table_header(align = "left")
+```
+
+## Implicit ranking of phrases
+
+
+```{r}
+# add a column with continuous responses converted to ranks for each vocabulary set for each participant
+d <- d %>%
+  group_by(dimension, vocab, id) %>%
+  arrange(response, .by_group = T) %>%
+  mutate(rank_observed = order(response)) %>%
+  ungroup()
+```
+
+```{r}
+# identify the different types of rank orderings used
+rank_summary_elife_import <- d %>%
+  filter(vocab == 'elife', dimension == 'importance') %>%
+  pivot_wider(id_cols = id, values_from = rank_observed, names_from = phrase, names_sort = T) %>%
+  unite(col = 'rank_observed', useful:landmark, sep = '-') %>%
+  mutate(rank_observed = factor(rank_observed)) %>%
+  count(rank_observed) %>%
+  arrange(desc(n)) %>%
+  cbind(MultinomCI(.$n, 
+                   conf.level=0.95,
+                   method="sisonglaz")) %>%
+  mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+  mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+  mutate(report = paste0(n, ' (',est,'% [',lwr.ci,'% to ',upr.ci,'%])')) %>%
+  mutate(rankMatch = ifelse(rank_observed == '1-2-3-4-5', T, F)) # identify which observed ranking maps to the intended ranking
+
+rank_summary_alt_import <- d %>%
+  filter(vocab == 'alt', dimension == 'importance') %>%
+  pivot_wider(id_cols = id, values_from = rank_observed, names_from = phrase, names_sort = T) %>%
+  unite(col = 'rank_observed', `very low importance`:`very high importance`, sep = '-') %>%
+  mutate(rank_observed = factor(rank_observed)) %>%
+  count(rank_observed) %>%
+  arrange(desc(n)) %>%
+  cbind(MultinomCI(.$n, 
+                   conf.level=0.95,
+                   method="sisonglaz")) %>%
+  mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+  mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+  mutate(report = paste0(n, ' (',est,'% [',lwr.ci,'% to ',upr.ci,'%])')) %>%
+  mutate(rankMatch = ifelse(rank_observed == '1-2-3-4-5', T, F)) # identify which observed ranking maps to the intended ranking
+
+rank_summary_elife_support <- d %>%
+  filter(vocab == 'elife', dimension == 'support') %>%
+  pivot_wider(id_cols = id, values_from = rank_observed, names_from = phrase, names_sort = T) %>%
+  unite(col = 'rank_observed', inadequate:exceptional, sep = '-') %>%
+  mutate(rank_observed = factor(rank_observed)) %>%
+  count(rank_observed) %>%
+  arrange(desc(n)) %>%
+  cbind(MultinomCI(.$n, 
+                   conf.level=0.95,
+                   method="sisonglaz")) %>%
+  mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+  mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+  mutate(report = paste0(n, ' (',est,'% [',lwr.ci,'% to ',upr.ci,'%])')) %>%
+  mutate(rankMatch = ifelse(rank_observed == '1-2-3-4-5-6', T, F)) # identify which observed ranking maps to the intended ranking
+
+rank_summary_alt_support <- d %>%
+  filter(vocab == 'alt', dimension == 'support') %>%
+  pivot_wider(id_cols = id, values_from = rank_observed, names_from = phrase, names_sort = T) %>%
+  unite(col = 'rank_observed', `very weak support`:`very strong support`, sep = '-') %>%
+  mutate(rank_observed = factor(rank_observed)) %>%
+  count(rank_observed) %>%
+  arrange(desc(n)) %>%
+  cbind(MultinomCI(.$n, 
+                   conf.level=0.95,
+                   method="sisonglaz")) %>%
+  mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+  mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+  mutate(report = paste0(n, ' (',est,'% [',lwr.ci,'% to ',upr.ci,'%])')) %>%
+  mutate(rankMatch = ifelse(rank_observed == '1-2-3-4-5', T, F)) # identify which observed ranking maps to the intended ranking
+```
+
+```{r}
+continge_prep_import <- d %>%
+  filter(dimension == "importance") %>%
+  pivot_wider(id_cols = c(vocab, id), values_from = rank_observed, names_from = rank_intended, names_sort = T) %>%
+  unite(col = 'rank_observed', 3:7, sep = '-') %>%
+  mutate(rank_intended = '1-2-3-4-5',
+         rankMatch = ifelse(rank_observed == rank_intended,T,F)) %>%
+  pivot_wider(id_cols = id, values_from = rankMatch, names_from = vocab) %>%
+  count(elife, alt)
+
+continge_table_import <- matrix(c(
+  continge_prep_import %>% filter(elife == F, alt == F) %>% pull(n),
+  continge_prep_import %>% filter(elife == T, alt == F) %>% pull(n),
+  continge_prep_import %>% filter(elife == F, alt == T) %>% pull(n),
+  continge_prep_import %>% filter(elife == T, alt == T) %>% pull(n)), ncol = 2) 
+
+continge_prep_support <- d %>%
+  filter(dimension == "support") %>%
+  pivot_wider(id_cols = c(vocab, id), values_from = rank_observed, names_from = rank_intended, names_sort = T) %>%
+  unite(col = 'rank_observed', 3:8, sep = '-') %>%
+  mutate(rank_observed = str_replace(rank_observed, "-NA", "")) %>%
+  mutate(rank_intended = ifelse(vocab == 'alt', '1-2-3-4-5', '1-2-3-4-5-6'), # the elife vocab on the support dimension has 6 phrases rather than 5
+         rankMatch = ifelse(rank_observed == rank_intended,T,F)) %>%
+  pivot_wider(id_cols = id, values_from = rankMatch, names_from = vocab) %>%
+  count(elife, alt)
+
+continge_table_support <- matrix(c(
+  continge_prep_support %>% filter(elife == F, alt == F) %>% pull(n),
+  continge_prep_support %>% filter(elife == T, alt == F) %>% pull(n),
+  continge_prep_support %>% filter(elife == F, alt == T) %>% pull(n),
+  continge_prep_support %>% filter(elife == T, alt == T) %>% pull(n)), ncol = 2) 
+```
+
+
+```{r}
+# exact mcnemar test with OR and CIs for importance dimension
+mcnemar_import <- continge_table_import %>% exact2x2(paired = T, midp = T)
+
+# exact mcnemar test with OR and CIs for support dimension
+mcnemar_support <- continge_table_support %>% exact2x2(paired = T, midp = T)
+```
+
+
+```{r}
+# make rankings table
+rank_summary_elife_import %>%
+  filter(n >= 6) %>%
+  select("Implicit ranking" = rank_observed, n, "% [CI]" = percentCI) %>%
+  gt() %>%
+  tab_header(
+    title = md("**eLife vocabulary — importance dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = "Implicit ranking"
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -"Implicit ranking"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  tab_footnote(
+    paste(rank_summary_elife_import %>% filter(n < 6) %>% nrow(), "other rankings with n < 6 are not shown here.")
+  )
+```
+
+```{r}
+# make rankings table
+rank_summary_alt_import %>%
+  filter(n >= 6) %>%
+  select("Implicit ranking" = rank_observed, n, "% [CI]" = percentCI) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Alternative vocabulary — importance dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = "Implicit ranking"
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -"Implicit ranking"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  tab_footnote(
+    paste(rank_summary_alt_import %>% filter(n < 6) %>% nrow(), "other rankings with n < 6 are not shown here.")
+  )
+```
+
+```{r}
+# make rankings table
+rank_summary_elife_support %>%
+  filter(n >= 6) %>%
+  select("Implicit ranking" = rank_observed, n, "% [CI]" = percentCI) %>%
+  gt() %>%
+  tab_header(
+    title = md("**eLife vocabulary — support dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = "Implicit ranking"
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -"Implicit ranking"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  tab_footnote(
+    paste(rank_summary_elife_support %>% filter(n < 6) %>% nrow(), "other rankings with n < 6 are not shown here.")
+  )
+```
+
+```{r}
+# make rankings table
+rank_summary_alt_support %>%
+  filter(n >= 6) %>%
+  select("Implicit ranking" = rank_observed, n, "% [CI]" = percentCI) %>%
+  gt() %>%
+  tab_header(
+    title = md("**Alternative vocabulary — support dimension**"),
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = "Implicit ranking"
+  ) %>%
+  cols_align(
+    align = "right",
+    columns = -"Implicit ranking"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  tab_footnote(
+    paste(rank_summary_alt_support %>% filter(n < 6) %>% nrow(), "other rankings with n < 6 are not shown here.")
+  )
+```
+
+
+```{r}
+# make simpler rankings plot
+
+# function to get number of participants with match and no match rankings for each vocab and dimension
+
+rankSimple <- function(d){
+  d %>%
+    group_by(rankMatch) %>%
+    summarise(n = sum(n)) %>%
+    ungroup() %>%
+    cbind(MultinomCI(.$n, 
+                     conf.level=0.95,
+                     method="sisonglaz")) %>%
+    mutate(across(c(est,lwr.ci,upr.ci), ~round(.x,2)*100)) %>% # convert proportions to rounded percentages
+    mutate(percentCI = paste0(est,' [',lwr.ci,', ',upr.ci,']')) %>%
+    filter(rankMatch == TRUE)
+}
+
+rankSimplePlot <- function(d){
+  d %>%
+    ggplot(aes(x = vocab, y = est, colour = rankMatch)) +
+    facet_grid(.~dimension) +
+    geom_pointrange(aes(ymin = lwr.ci, ymax = upr.ci), size = 1.1, linewidth = 1.3, shape = 21, fill = "white", colour = "black") +
+    #geom_text(aes(label = percentCI), nudge_y = 15) +
+    scale_colour_manual(values = c('Match' = okabe[1], 'No match' = okabe[5]), guide = 'none') +
+    ylim(0,100) +
+    xlab('vocabularly') +
+    ylab('correct ranking (%)') +
+    theme(
+      strip.text = element_text(margin = margin(t = 10, r = 10, b = 10, l = 10)),
+      axis.text.x = element_text(margin = margin(b = 10))
+    )
+}
+
+rank_simple_plot <- bind_rows(
+  rank_summary_elife_import %>%
+  rankSimple() %>%
+  mutate(vocab = 'eLife', dimension = 'Importance dimension'),
+  rank_summary_alt_import %>%
+  rankSimple() %>%
+  mutate(vocab = 'Alternative', dimension = 'Importance dimension'),
+  rank_summary_elife_support %>%
+  rankSimple() %>%
+  mutate(vocab = 'eLife', dimension = 'Support dimension'),
+  rank_summary_alt_support %>%
+  rankSimple() %>%
+  mutate(vocab = 'Alternative', dimension = 'Support dimension'),
+) %>% 
+  mutate(vocab = factor(vocab, levels = c('eLife', 'Alternative'))) %>% 
+  rankSimplePlot()
+  
+
+```
+
+```{r}
+#| echo: false
+#| label: fig-rank-prop-simple
+#| fig-cap: "Proportion of participants whose implicit ranking matched the intended ranking (i.e., ‘correct ranking’) for both evaluative dimensions and both vocabularies. Error bars represent 95% confidence intervals computed with the Sison-Glaz method (Sison & Glaz, 1995)."
+#| fig-height: 5
+rank_simple_plot 
+```
+
+
+Although participants responded to each word separately on a continuous scale, these responses also imply an implicit overall ranking of the phrases (in order of significance/importance or support). Ideally, an evaluative vocabulary will elicit implicit rankings that are consistent between participants and consistent with the intended ranking @fig-rank-prop-simple shows the proportion of participants whose implicit ranking matched the intended ranking (i.e., “correct ranking”) for the different evaluative dimensions and vocabularies. 
+
+On the importance dimension, `r rank_summary_elife_import %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the eLife vocabulary and `r rank_summary_alt_import %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the alternative vocabulary. We performed an ‘exact’ McNemar test and computed the McNemar odds ratio with Clopper Pearson 95% confidence intervals adjusted with the ‘midp’ method, as recommended by Fagerland et al. (2013). The McNemar test indicated that observing a difference between the vocabularies this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r round(mcnemar_import$estimate[[1]],2)`, 95% CI \[`r round(mcnemar_import$conf.int[[1]],0)`,`r round(mcnemar_import$conf.int[[2]],0)`\], *p* `r scales::pvalue(mcnemar_import$p.value[[1]])`). The intended ranking was the most popular for both vocabularies; however, there were `r rank_summary_elife_import %>% nrow()` different implicit rankings for the eLife vocabulary, relative to `r rank_summary_alt_import %>% nrow()` implicit rankings for the alternative vocabulary (for details, see Supplementary Tables F1-F4)
+
+On the support dimension, `r rank_summary_elife_support %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the eLife vocabulary and `r rank_summary_alt_support %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the alternative vocabulary. The McNemar test indicatd that observing a difference between the vocabularies this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r round(mcnemar_support$estimate[[1]],2)`, 95% CI \[`r round(mcnemar_support$conf.int[[1]],0)`,`r round(mcnemar_support$conf.int[[2]],0)`\], *p* `r scales::pvalue(mcnemar_support$p.value[[1]])`). The intended ranking was the most popular for both vocabularies; though for the eLife vocabulary an unintended ranking that swapped the ordinal positions of “convincing” and “solid” came a close second, adhered to by `r rank_summary_elife_support %>% slice(2) %>% pull(report)` participants. Overall, there were `r rank_summary_elife_support %>% nrow()` different implicit rankings for the eLife vocabulary, relative to `r rank_summary_alt_support %>% nrow()` implicit rankings for the alternative vocabulary.
+  
+  
+
+
+```{r}
+# first, for the importance dimension 
+
+# get rank sequence used by each participant
+p_rank_seq_elife_import <- d %>%
+  filter(dimension == 'importance', vocab == 'elife') %>% 
+  group_by(id) %>% 
+  summarise(rank_seq = paste(rank_intended, collapse = '-')) %>% 
+  ungroup()
+
+p_rank_seq_alt_import <- d %>% 
+  filter(dimension == 'importance', vocab == 'alt') %>%
+  group_by(id) %>% 
+  summarise(rank_seq = paste(rank_intended, collapse = '-')) %>% 
+  ungroup()
+
+# count number of participants using each ranking sequence
+p_rank_seq_elife_import_count <- p_rank_seq_elife_import %>%
+  count(rank_seq) %>%
+  ungroup() %>%
+  mutate(popularity_rank = row_number(desc(n))) %>%
+  mutate(rank_seq_colour = ifelse(popularity_rank > 5, 'other', rank_seq)) %>%
+  arrange(desc(n))
+
+p_rank_seq_alt_import_count <- p_rank_seq_alt_import %>%
+  count(rank_seq) %>%
+  ungroup() %>%
+  mutate(popularity_rank = row_number(desc(n))) %>%
+  mutate(rank_seq_colour = ifelse(popularity_rank > 5, 'other', rank_seq)) %>%
+  arrange(desc(n))
+
+# gather the data together
+p_rank_seq_elife_import <- p_rank_seq_elife_import %>%
+  left_join(p_rank_seq_elife_import_count, by = 'rank_seq')
+
+p_rank_seq_alt_import <- p_rank_seq_alt_import %>%
+  left_join(p_rank_seq_alt_import_count, by = 'rank_seq')
+
+
+# this is to normalise Kd
+rank_length <- 5 # this is the length of one of the ranked lists
+normalisationFactor <- (rank_length*(rank_length-1))/2
+
+# compute Kd for each vocabularly for each participant
+p_rank_seq_elife_import <- p_rank_seq_elife_import %>%
+  rowwise() %>%
+  mutate(kendall_distance = calcTopTau(as.numeric(str_split(rank_seq,'-')[[1]]),c(1,2,3,4,5)),
+         kendall_distance_normalized = kendall_distance/normalisationFactor)
+
+p_rank_seq_alt_import <- p_rank_seq_alt_import %>%
+  rowwise() %>%
+  mutate(kendall_distance = calcTopTau(as.numeric(str_split(rank_seq,'-')[[1]]),c(1,2,3,4,5)),
+         kendall_distance_normalized = kendall_distance/normalisationFactor)
+
+# combine the dataframes
+p_rank_seq_import <- bind_rows(
+  p_rank_seq_elife_import %>% mutate(vocab = 'elife'),
+  p_rank_seq_alt_import %>% mutate(vocab = 'alt')
+)
+
+# now for the support dimension
+# get rank sequence used by each participant
+p_rank_seq_elife_support <- d %>%
+  filter(dimension == 'support', vocab == 'elife') %>% 
+  group_by(id) %>% 
+  summarise(rank_seq = paste(rank_intended, collapse = '-')) %>% 
+  ungroup()
+
+p_rank_seq_alt_support <- d %>% 
+  filter(dimension == 'support', vocab == 'alt') %>%
+  group_by(id) %>% 
+  summarise(rank_seq = paste(rank_intended, collapse = '-')) %>% 
+  ungroup()
+
+# count number of participants using each ranking sequence
+p_rank_seq_elife_support_count <- p_rank_seq_elife_support %>%
+  count(rank_seq) %>%
+  ungroup() %>%
+  mutate(popularity_rank = row_number(desc(n))) %>%
+  mutate(rank_seq_colour = ifelse(popularity_rank > 5, 'other', rank_seq)) %>%
+  arrange(desc(n))
+
+p_rank_seq_alt_support_count <- p_rank_seq_alt_support %>%
+  count(rank_seq) %>%
+  ungroup() %>%
+  mutate(popularity_rank = row_number(desc(n))) %>%
+  mutate(rank_seq_colour = ifelse(popularity_rank > 5, 'other', rank_seq)) %>%
+  arrange(desc(n))
+
+# gather the data together
+p_rank_seq_elife_support <- p_rank_seq_elife_support %>%
+  left_join(p_rank_seq_elife_support_count, by = 'rank_seq')
+
+p_rank_seq_alt_support <- p_rank_seq_alt_support %>%
+  left_join(p_rank_seq_alt_support_count, by = 'rank_seq')
+
+
+# this is to normalise Kd
+rank_length_support_alt <- 5 # this is the length of one of the ranked lists
+rank_length_support_elife <- 6 # this is the length of one of the ranked lists
+normalisationFactor_support_alt <- (rank_length_support_alt*(rank_length_support_alt-1))/2
+normalisationFactor_support_elife <- (rank_length_support_elife*(rank_length_support_elife-1))/2
+
+# compute Kd for each vocabularly for each participant
+p_rank_seq_elife_support <- p_rank_seq_elife_support %>%
+  rowwise() %>%
+  mutate(kendall_distance = calcTopTau(as.numeric(str_split(rank_seq,'-')[[1]]),c(1,2,3,4,5)),
+         kendall_distance_normalized = kendall_distance/normalisationFactor_support_elife)
+
+p_rank_seq_alt_support <- p_rank_seq_alt_support %>%
+  rowwise() %>%
+  mutate(kendall_distance = calcTopTau(as.numeric(str_split(rank_seq,'-')[[1]]),c(1,2,3,4,5,6)),
+         kendall_distance_normalized = kendall_distance/normalisationFactor_support_alt)
+
+# combine the dataframes
+p_rank_seq_support <- bind_rows(
+  p_rank_seq_elife_support %>% mutate(vocab = 'elife'),
+  p_rank_seq_alt_support %>% mutate(vocab = 'alt')
+)
+
+# make plots
+kd_plots_import <- p_rank_seq_import %>%
+  count(vocab, kendall_distance_normalized) %>%
+  ggplot(aes(y = n, x = kendall_distance_normalized)) +
+  facet_wrap(.~vocab, nrow = 2) +
+  geom_col() +
+  ylim(0,250)
+
+kd_plots_support <- p_rank_seq_support %>%
+  count(vocab, kendall_distance_normalized) %>%
+  ggplot(aes(y = n, x = kendall_distance_normalized)) +
+  facet_wrap(.~vocab, nrow = 2) +
+  geom_col() +
+  ylim(0,250)
+
+kd_plot <- bind_rows(
+  p_rank_seq_import %>% 
+    mutate(dimension = "Importance dimension"),
+  p_rank_seq_support %>% 
+    mutate(dimension = "Support dimension")
+  ) %>%
+  count(vocab, dimension, kendall_distance_normalized) %>%
+  mutate(vocab = factor(vocab),
+         vocab = fct_recode(vocab, "eLife" = "elife", "Alternative" = "alt"),
+         vocab = fct_relevel(vocab, "eLife", "Alternative")) %>%
+  ggplot(aes(y = n, x = kendall_distance_normalized, fill = factor(kendall_distance_normalized == 0))) +
+  facet_wrap(vocab~dimension) +
+  geom_col() +
+  ylim(0,250) +
+  scale_x_continuous(breaks = seq(0,1,.1)) +
+  scale_fill_manual(values = c("TRUE" = okabe[1], "FALSE" = "grey")) +
+  guides(fill = "none") +  # Hide the legend
+  theme(      
+    strip.text = element_text(margin = margin(t = 5, r = 0, b = 10, l = 0)),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+  xlab("Normalized Kendall distance") +
+  ylab("Number of participants")
+```
+
+The results outlined so far emphasize the binary difference between implicit and intended ranking. A complementary analysis quantifies the degree of similarity between rankings using Kendall’s tau distance (Kd) — a metric that describes the difference between two lists in terms of the number of adjacent pairwise swaps required to convert one list into the other (Kendall, 1938; van Doorn et al., 2021). The larger the distance, the larger the dissimilarity between the two lists. Kd ranges from 0 (indicating a complete match) to n(n-1)/2 (where n is the size of one list). Because the eLife support dimension has six phrases and all other dimensions have five phrases, we report the normalised Kd which ranges from 0 (maximal similarity) to 1 (maximal dissimilarity). Further explanation of Kd is provided in Supplementary Information G.
+	@fig-kd-plot illustrates the extent to which participants’ implicit rankings deviated from the intended ranking in terms of normalized Kd. This suggests that although deviations from the intended eLife ranking are common, they only tend to be on the order of one or two disconcordant rank pairs. By contrast, the alternative vocabulary rarely results in any deviations, and when it does these are typically only in terms of one disconcordant rank pair.
+
+
+```{r}
+#| echo: false
+#| label: fig-kd-plot
+#| fig-cap: "Extent to which implicit rankings deviated from intended rankings in terms of normalized Kendall's distance. Zero represents a perfect match (green bar), other values (grey bars) represent increasing dissimilarity from the intended ranking up to 1, which represents maximal dissimilarity."
+#| fig-width: 8
+kd_plot
+```
+
+
+
+@fig-rank-prop-import/@fig-rank-prop-support tell us how many participants adhered to the intended ranking and @fig-kd-plots-import/@fig-kd-plots-support tell us by how much; however, these approaches don't give us much insight into *where* the ranking deviations are concentrated (i.e., which phrases are being misranked). This is to some extent apparent in @fig-ridge-import/@fig-ridge-support, but to address this question more directly we need a more granular analysis of the observed ranking sequences and where they tend to deviate from the intended ranking.
+
+One approach is to plot heatmaps that show the proportion of concordant and discordant rankings at the level of individual phrases (@fig-heat). In an ideal scenario, a phrase's observed rank will match its intended rank for 100% of participants. For example, the heat maps show that almost all participants correctly ranked "moderate importance" and "moderate support". By contrast, "valuable" and "important" are often misranked with each other.
+
+```{r}
+heat_elife_import <- d %>%
+  filter(dimension == 'importance', vocab == 'elife') %>%
+  mutate(rank_intended = factor(rank_intended), rank_observed = factor(rank_observed)) %>%
+  count(rank_intended, rank_observed, .drop = F) %>% 
+  mutate(percent = (n/N_eligible)*100) %>%
+  ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_x_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_elife,20)) +
+  scale_y_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_elife,15)) +
+  geom_text(aes(label = round(percent, 0)), size=3) +
+    theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.x = element_text(angle = 60, hjust = 1),
+  ) +
+  ggtitle('elife vocabulary.\nImportance dimension.') +
+  xlab('intended rank') +
+  ylab('observed rank') +
+  theme(legend.position="right")
+
+heat_alt_import <- d %>%
+  filter(dimension == 'importance', vocab == 'alt') %>%
+  mutate(rank_intended = factor(rank_intended), rank_observed = factor(rank_observed)) %>%
+  count(rank_intended, rank_observed, .drop = F) %>% 
+  mutate(percent = (n/N_eligible)*100) %>%
+  ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_x_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_alt,20)) +
+  scale_y_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_alt,15)) +
+  geom_text(aes(label = round(percent, 0)), size=3) +
+    theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.x = element_text(angle = 60, hjust = 1),
+  ) +
+  ggtitle('Alternative vocabulary.\nImportance dimension.') +
+  xlab('intended rank') +
+  ylab('observed rank') +
+  theme(legend.position="right")
+
+heat_elife_support <- d %>%
+  filter(dimension == 'support', vocab == 'elife') %>%
+  mutate(rank_intended = factor(rank_intended), rank_observed = factor(rank_observed)) %>%
+  count(rank_intended, rank_observed, .drop = F) %>% 
+  mutate(percent = (n/N_eligible)*100) %>%
+  ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_x_discrete(breaks = seq(1,6,1), labels = str_wrap(support_elife,20)) +
+  scale_y_discrete(breaks = seq(1,6,1), labels = str_wrap(support_elife,15)) +
+  geom_text(aes(label = round(percent, 0)), size=3) +
+    theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.x = element_text(angle = 60, hjust = 1),
+  ) +
+  ggtitle('elife vocabulary.\nSupport dimension.') +
+  xlab('intended rank') +
+  ylab('observed rank') +
+  theme(legend.position="right")
+
+heat_alt_support <- d %>%
+  filter(dimension == 'support', vocab == 'alt') %>%
+  mutate(rank_intended = factor(rank_intended), rank_observed = factor(rank_observed)) %>%
+  count(rank_intended, rank_observed, .drop = F) %>% 
+  mutate(percent = (n/N_eligible)*100) %>%
+  ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
+  geom_tile() +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_x_discrete(breaks = seq(1,5,1), labels = str_wrap(support_alt,20)) +
+  scale_y_discrete(breaks = seq(1,5,1), labels = str_wrap(support_alt,15)) +
+  geom_text(aes(label = round(percent, 0)), size=3) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.x = element_text(angle = 60, hjust = 1),
+  ) +
+  ggtitle('Alternative vocabulary.\nSupport dimension.') +
+  xlab('intended rank') +
+  ylab('observed rank') +
+  theme(legend.position="right")
+```
+
+
+```{r}
+#| echo: false
+#| label: fig-heat-all
+#| fig-cap: "Heat maps showing the percentage of participants whose implicit rankings were concordant or disconcordant with the intended ranking at the level of individual phrases. Darker colours and higher percentages indicate greater concordance between the implicit rank and the intended rank of a particular phrases."
+#| fig-height: 9
+heat_elife_import / heat_elife_support / heat_alt_import / heat_alt_support +
+  plot_layout(
+    ncol = 2,  # 2 columns
+    byrow = TRUE,  # Fill rows first
+    heights = c(1, 1),  # Optional: adjust the height of rows
+    widths = c(1, 1)    # Optional: adjust the width of columns
+  ) +
+  plot_layout(guides = "collect") &  # Collect and display the combined legend
+  theme(legend.position='bottom',
+        plot.title = element_text(size = 11, face = "bold", colour = "black", hjust = 0, margin = margin(t = 0, r = 0, b = 5, l = 0)),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.text = element_text(size = 10))
+```
+
+
+## References
+
+Kendall, M. G. (1938). A new measure of rank correlation. Biometrika, 30(1--2), 81--93. https://doi.org/10.1093/biomet/30.1-2.81
+
+Fay, M. P., & Lumbard, K. (2021). Confidence intervals for difference in proportions for matched pairs compatible with exact McNemar's or sign tests. Statistics in Medicine, 40(5), 1147--1159. https://doi.org/10.1002/sim.8829
+
+Wilke, C. (2019). Fundamentals of data visualization: A primer on making informative and compelling figures (First edition). O’Reilly Media.
