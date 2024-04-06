@@ -260,7 +260,7 @@ ridge_support <- d %>%
     strip.background = element_rect(colour='white', fill='white')) +
   scale_x_continuous(limits = c(0,100), expand = c(0, 0)) +
   scale_y_discrete(expand = expansion(mult = c(0.01, .5))) +
-  ggtitle("Support dimension")
+  ggtitle("Strength of support dimension")
 ```
 
 ```{r fig-ridge-import, warning = F, echo = F, fig.height=8, fig.cap = 'Responses to each phrase on the importance/significance dimension as kernel density distributions with the 25th, 50th (i.e., median), and 75th quantiles represented by black vertical lines and the 25th-75th quantile region (i.e., interquartile range) highlighted in blue.'}
@@ -625,9 +625,9 @@ rankSimplePlot <- function(d){
   d %>%
     ggplot(aes(x = vocab, y = est, colour = rankMatch)) +
     facet_grid(.~dimension) +
-    geom_pointrange(aes(ymin = lwr.ci, ymax = upr.ci), size = 1.1, linewidth = 1.3, shape = 21, fill = "white", colour = "black") +
+    geom_pointrange(aes(ymin = lwr.ci, ymax = upr.ci, colour = vocab), size = 1.1, linewidth = 1.3, shape = 21, fill = "white") +
     #geom_text(aes(label = percentCI), nudge_y = 15) +
-    scale_colour_manual(values = c('Match' = okabe[1], 'No match' = okabe[5]), guide = 'none') +
+    scale_colour_manual(values = c('eLife' = okabe[4], 'Alternative' = "#9E3F71"), guide = 'none') +
     ylim(0,100) +
     xlab('vocabularly') +
     ylab('correct ranking (%)') +
@@ -640,16 +640,16 @@ rankSimplePlot <- function(d){
 rank_simple_plot <- bind_rows(
   rank_summary_elife_import %>%
   rankSimple() %>%
-  mutate(vocab = 'eLife', dimension = 'Importance dimension'),
+  mutate(vocab = 'eLife', dimension = 'Importance\ndimension'),
   rank_summary_alt_import %>%
   rankSimple() %>%
-  mutate(vocab = 'Alternative', dimension = 'Importance dimension'),
+  mutate(vocab = 'Alternative', dimension = 'Importance\ndimension'),
   rank_summary_elife_support %>%
   rankSimple() %>%
-  mutate(vocab = 'eLife', dimension = 'Support dimension'),
+  mutate(vocab = 'eLife', dimension = 'Strength of support\ndimension'),
   rank_summary_alt_support %>%
   rankSimple() %>%
-  mutate(vocab = 'Alternative', dimension = 'Support dimension'),
+  mutate(vocab = 'Alternative', dimension = 'Strength of support\ndimension'),
 ) %>% 
   mutate(vocab = factor(vocab, levels = c('eLife', 'Alternative'))) %>% 
   rankSimplePlot()
@@ -668,9 +668,9 @@ rank_simple_plot
 
 Although participants responded to each word separately on a continuous scale, these responses also imply an implicit overall ranking of the phrases (in order of significance/importance or support). Ideally, an evaluative vocabulary will elicit implicit rankings that are consistent between participants and consistent with the intended ranking @fig-rank-prop-simple shows the proportion of participants whose implicit ranking matched the intended ranking (i.e., “correct ranking”) for the different evaluative dimensions and vocabularies. 
 
-On the importance dimension, `r rank_summary_elife_import %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the eLife vocabulary and `r rank_summary_alt_import %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the alternative vocabulary. We performed an ‘exact’ McNemar test and computed the McNemar odds ratio with Clopper Pearson 95% confidence intervals adjusted with the ‘midp’ method, as recommended by Fagerland et al. (2013). The McNemar test indicated that observing a difference between the vocabularies this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r round(mcnemar_import$estimate[[1]],2)`, 95% CI \[`r round(mcnemar_import$conf.int[[1]],0)`,`r round(mcnemar_import$conf.int[[2]],0)`\], *p* `r scales::pvalue(mcnemar_import$p.value[[1]])`). The intended ranking was the most popular for both vocabularies; however, there were `r rank_summary_elife_import %>% nrow()` different implicit rankings for the eLife vocabulary, relative to `r rank_summary_alt_import %>% nrow()` implicit rankings for the alternative vocabulary (for details, see Supplementary Tables F1-F4)
+On the importance dimension, `r rank_summary_elife_import %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the eLife vocabulary and `r rank_summary_alt_import %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the alternative vocabulary. We performed an ‘exact’ McNemar test and computed the McNemar odds ratio with Clopper Pearson 95% confidence intervals adjusted with the ‘midp’ method, as recommended by Fagerland et al. (2013). The McNemar test indicated that observing a difference between the vocabularies this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r round(mcnemar_import$estimate[[1]],2)`, 95% CI \[`r round(mcnemar_import$conf.int[[1]],2)`,`r round(mcnemar_import$conf.int[[2]],2)`\], *p* `r scales::pvalue(mcnemar_import$p.value[[1]])`). The intended ranking was the most popular for both vocabularies; however, there were `r rank_summary_elife_import %>% nrow()` different implicit rankings for the eLife vocabulary, relative to `r rank_summary_alt_import %>% nrow()` implicit rankings for the alternative vocabulary (for details, see Supplementary Tables F1-F4)
 
-On the support dimension, `r rank_summary_elife_support %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the eLife vocabulary and `r rank_summary_alt_support %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the alternative vocabulary. The McNemar test indicatd that observing a difference between the vocabularies this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r round(mcnemar_support$estimate[[1]],2)`, 95% CI \[`r round(mcnemar_support$conf.int[[1]],0)`,`r round(mcnemar_support$conf.int[[2]],0)`\], *p* `r scales::pvalue(mcnemar_support$p.value[[1]])`). The intended ranking was the most popular for both vocabularies; though for the eLife vocabulary an unintended ranking that swapped the ordinal positions of “convincing” and “solid” came a close second, adhered to by `r rank_summary_elife_support %>% slice(2) %>% pull(report)` participants. Overall, there were `r rank_summary_elife_support %>% nrow()` different implicit rankings for the eLife vocabulary, relative to `r rank_summary_alt_support %>% nrow()` implicit rankings for the alternative vocabulary.
+On the support dimension, `r rank_summary_elife_support %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the eLife vocabulary and `r rank_summary_alt_support %>% filter(rankMatch == T) %>% pull(report)` participants aligned with the correct ranking for the alternative vocabulary. The McNemar test indicated that observing a difference between the vocabularies this large, or larger, is unlikely if the null hypothesis were true (odds ratio = `r round(mcnemar_support$estimate[[1]],2)`, 95% CI \[`r round(mcnemar_support$conf.int[[1]],2)`,`r round(mcnemar_support$conf.int[[2]],2)`\], *p* `r scales::pvalue(mcnemar_support$p.value[[1]])`). The intended ranking was the most popular for both vocabularies; though for the eLife vocabulary an unintended ranking that swapped the ordinal positions of “convincing” and “solid” came a close second, adhered to by `r rank_summary_elife_support %>% slice(2) %>% pull(report)` participants. Overall, there were `r rank_summary_elife_support %>% nrow()` different implicit rankings for the eLife vocabulary, relative to `r rank_summary_alt_support %>% nrow()` implicit rankings for the alternative vocabulary.
   
   
 
@@ -825,7 +825,7 @@ kd_plot <- bind_rows(
   geom_col() +
   ylim(0,250) +
   scale_x_continuous(breaks = seq(0,1,.1)) +
-  scale_fill_manual(values = c("TRUE" = okabe[1], "FALSE" = "grey")) +
+  scale_fill_manual(values = c("TRUE" = okabe[1], "FALSE" = "grey22")) +
   guides(fill = "none") +  # Hide the legend
   theme(      
     strip.text = element_text(margin = margin(t = 5, r = 0, b = 10, l = 0)),
@@ -847,8 +847,6 @@ The results outlined so far emphasize the binary difference between implicit and
 kd_plot
 ```
 
-
-
 @fig-rank-prop-import/@fig-rank-prop-support tell us how many participants adhered to the intended ranking and @fig-kd-plots-import/@fig-kd-plots-support tell us by how much; however, these approaches don't give us much insight into *where* the ranking deviations are concentrated (i.e., which phrases are being misranked). This is to some extent apparent in @fig-ridge-import/@fig-ridge-support, but to address this question more directly we need a more granular analysis of the observed ranking sequences and where they tend to deviate from the intended ranking.
 
 One approach is to plot heatmaps that show the proportion of concordant and discordant rankings at the level of individual phrases (@fig-heat). In an ideal scenario, a phrase's observed rank will match its intended rank for 100% of participants. For example, the heat maps show that almost all participants correctly ranked "moderate importance" and "moderate support". By contrast, "valuable" and "important" are often misranked with each other.
@@ -861,7 +859,7 @@ heat_elife_import <- d %>%
   mutate(percent = (n/N_eligible)*100) %>%
   ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
   geom_tile() +
-  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='Participants (%)') +
   scale_x_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_elife,20)) +
   scale_y_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_elife,15)) +
   geom_text(aes(label = round(percent, 0)), size=3) +
@@ -869,9 +867,9 @@ heat_elife_import <- d %>%
     panel.grid.major.y = element_blank(),
     axis.text.x = element_text(angle = 60, hjust = 1),
   ) +
-  ggtitle('elife vocabulary.\nImportance dimension.') +
-  xlab('intended rank') +
-  ylab('observed rank') +
+  ggtitle('eLife vocabulary.\nImportance dimension.') +
+  xlab('Intended rank') +
+  ylab('Observed rank') +
   theme(legend.position="right")
 
 heat_alt_import <- d %>%
@@ -881,7 +879,7 @@ heat_alt_import <- d %>%
   mutate(percent = (n/N_eligible)*100) %>%
   ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
   geom_tile() +
-  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='Participants (%)') +
   scale_x_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_alt,20)) +
   scale_y_discrete(breaks = seq(1,5,1), labels = str_wrap(importance_alt,15)) +
   geom_text(aes(label = round(percent, 0)), size=3) +
@@ -890,8 +888,8 @@ heat_alt_import <- d %>%
     axis.text.x = element_text(angle = 60, hjust = 1),
   ) +
   ggtitle('Alternative vocabulary.\nImportance dimension.') +
-  xlab('intended rank') +
-  ylab('observed rank') +
+  xlab('Intended rank') +
+  ylab('Observed rank') +
   theme(legend.position="right")
 
 heat_elife_support <- d %>%
@@ -901,7 +899,7 @@ heat_elife_support <- d %>%
   mutate(percent = (n/N_eligible)*100) %>%
   ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
   geom_tile() +
-  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='Participants (%)') +
   scale_x_discrete(breaks = seq(1,6,1), labels = str_wrap(support_elife,20)) +
   scale_y_discrete(breaks = seq(1,6,1), labels = str_wrap(support_elife,15)) +
   geom_text(aes(label = round(percent, 0)), size=3) +
@@ -909,9 +907,9 @@ heat_elife_support <- d %>%
     panel.grid.major.y = element_blank(),
     axis.text.x = element_text(angle = 60, hjust = 1),
   ) +
-  ggtitle('elife vocabulary.\nSupport dimension.') +
-  xlab('intended rank') +
-  ylab('observed rank') +
+  ggtitle('eLife vocabulary.\nStrength of support dimension.') +
+  xlab('Intended rank') +
+  ylab('Observed rank') +
   theme(legend.position="right")
 
 heat_alt_support <- d %>%
@@ -921,17 +919,17 @@ heat_alt_support <- d %>%
   mutate(percent = (n/N_eligible)*100) %>%
   ggplot(aes(x= rank_intended, y = rank_observed, fill = percent)) +
   geom_tile() +
-  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='participants (%)') +
+  scale_fill_gradient(low="white", high=okabe[1], limits = c(0,100), name='Participants (%)') +
   scale_x_discrete(breaks = seq(1,5,1), labels = str_wrap(support_alt,20)) +
   scale_y_discrete(breaks = seq(1,5,1), labels = str_wrap(support_alt,15)) +
   geom_text(aes(label = round(percent, 0)), size=3) +
   theme(
     panel.grid.major.y = element_blank(),
-    axis.text.x = element_text(angle = 60, hjust = 1),
+    axis.text.x = element_text(angle = 60, hjust = 1)
   ) +
-  ggtitle('Alternative vocabulary.\nSupport dimension.') +
-  xlab('intended rank') +
-  ylab('observed rank') +
+  ggtitle('Alternative vocabulary.\nStrength of support dimension.') +
+  xlab('Intended rank') +
+  ylab('Observed rank') +
   theme(legend.position="right")
 ```
 
@@ -951,6 +949,7 @@ heat_elife_import / heat_elife_support / heat_alt_import / heat_alt_support +
   plot_layout(guides = "collect") &  # Collect and display the combined legend
   theme(legend.position='bottom',
         plot.title = element_text(size = 11, face = "bold", colour = "black", hjust = 0, margin = margin(t = 0, r = 0, b = 5, l = 0)),
+        plot.title.position = "plot",
         axis.title = element_text(size = 12),
         axis.text = element_text(size = 10),
         legend.text = element_text(size = 10))
